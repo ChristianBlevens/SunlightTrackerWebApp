@@ -239,15 +239,12 @@
     </div>
 
     <script>
-        // Debug mode flag
-        const DEBUG = false;
-        
         // Global state
         const state = {
             lat: null,
             lon: null,
             cityName: null,
-            debugMode: false,
+            debugMode: true,
             debugHour: null,
             times: {
                 sunset: null,
@@ -257,7 +254,7 @@
             }
         };
 
-        // Get current time (real or debug)
+        // Get current time
         function getCurrentTime() {
             if (state.debugMode && state.debugHour !== null) {
                 const now = new Date();
@@ -546,7 +543,7 @@
         }
 
         // Initialize debug controls
-        if (DEBUG) {
+        if (state.debugMode) {
             // Show debug controls
             document.querySelector('.debug-controls').style.display = 'flex';
             
@@ -554,7 +551,6 @@
             const debugTimeDisplay = document.getElementById('debugTime');
             
             timeSlider.addEventListener('input', (e) => {
-                state.debugMode = true;
                 state.debugHour = parseFloat(e.target.value);
                 const hours = Math.floor(state.debugHour);
                 const minutes = Math.floor((state.debugHour % 1) * 60);
@@ -568,23 +564,22 @@
             timeSlider.value = currentHour;
             debugTimeDisplay.textContent = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
         }
+
         // Animation loop for real-time updates
         let lastUpdateTime = 0;
         function animate(currentTime) {
-            // Update every frame when not in debug mode
-            if (!state.debugMode) {
-                // Throttle updates to once per second for performance
-                if (currentTime - lastUpdateTime > 1000) {
-                    updateDisplay();
-                    lastUpdateTime = currentTime;
-                } else {
-                    // Still update visuals every frame for smooth transitions
-                    updateVisuals();
-                }
+            // Update every frame
+            // Throttle updates to once per second for performance
+            if (currentTime - lastUpdateTime > 1000) {
+                updateDisplay();
+                lastUpdateTime = currentTime;
+            } else {
+                // Still update visuals every frame for smooth transitions
+                updateVisuals();
             }
             requestAnimationFrame(animate);
         }
-        
+
         // Get location and start app
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
