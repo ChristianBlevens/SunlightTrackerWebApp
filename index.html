@@ -58,10 +58,10 @@
 
         .container {
             text-align: center;
-            padding: 1vh 0.5vw;
+            padding: 1vh 1vw;
             width: 95vw;
             max-width: 500px;
-            height: 98vh;
+            height: 95vh;
             position: relative;
             z-index: 10;
             display: flex;
@@ -85,14 +85,72 @@
         }
 
         #moon {
-            background: radial-gradient(circle, #f0f0f0, #d0d0d0);
-            box-shadow: 0 0 min(3vh, 30px) #f0f0f0, 0 0 min(5vh, 50px) #d0d0d0;
+            --moon-phase-blur: 3px;
+            --moon-phase-mask-bg: #000;
+            --moon-phase-mask-opacity: 0.85;
+            
+            background: transparent;
+            box-shadow: none;
             opacity: 0;
+            overflow: clip;
+        }
+
+        #moon::before {
+            background: url('https://assets.stoumann.dk/img/moon.png') center / cover no-repeat;  
+            content: '';
+            filter: sepia(0.5) grayscale(0.1) brightness(1.1);
+            inset: 0;
+            position: absolute;
+            border-radius: 50%;
+        }
+
+        #moon::after {
+            background-color: var(--moon-phase-mask-bg);
+            border-radius: var(--_btlr, 0) var(--_btrr, 0) var(--_bbrr, 0) var(--_bblr, 0);
+            content: '';
+            filter: blur(var(--moon-phase-blur));
+            height: 100%;
+            inset-inline: var(--_ii, auto 0);
+            opacity: var(--moon-phase-mask-opacity);
+            position: absolute;
+            width: var(--_w, 50%);
+        }
+
+        /* Phases */
+        #moon[data-phase*="first quarter"],
+        #moon[data-phase*="waxing"] {
+            --_ii: 0 auto;
+        }
+        #moon[data-phase*="crescent"],
+        #moon[data-phase*="first quarter"],
+        #moon[data-phase*="waxing"] {
+            --_bblr: 100%;
+            --_btlr: 100%;
+        }
+        #moon[data-phase*="crescent"],
+        #moon[data-phase*="last quarter"],
+        #moon[data-phase*="waning"] {
+            --_btrr: 100%;
+            --_bbrr: 100%;
+        }
+        #moon[data-phase*="gibbous"]::after {
+            border-radius: 0;
+            width: 100%;
+        }
+        #moon[data-phase="waxing gibbous"]::after {
+            mask: radial-gradient(circle at 100% 50%,
+                #0000 calc(100% - var(--_w)),
+                #000 calc(100% - var(--_w) + 1px + (2 * var(--moon-phase-blur))) 100%);
+        }
+        #moon[data-phase="waning gibbous"]::after {
+            mask: radial-gradient(circle at 0% 50%,
+                #0000 calc(100% - var(--_w)),
+                #000 calc(100% - var(--_w) + 1px + (2 * var(--moon-phase-blur))) 100%);
         }
 
         .header {
             flex-shrink: 0;
-            height: 15vh;
+            height: 20vh;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -112,6 +170,22 @@
         @keyframes glow {
             from { filter: drop-shadow(0 0 min(2vh, 20px) rgba(255, 215, 0, 0.5)); }
             to { filter: drop-shadow(0 0 min(3vh, 30px) rgba(255, 140, 0, 0.8)); }
+        }
+
+        .moon-phase {
+            font-size: min(2.2vh, 1rem);
+            opacity: 0.9;
+            margin-bottom: 0.5vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .moon-icon {
+            width: min(2.5vh, 20px);
+            height: min(2.5vh, 20px);
+            filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.5));
         }
 
         .location {
@@ -253,6 +327,7 @@
     <div class="container">
         <div class="header">
             <h1>Sunlight Tracker</h1>
+            <div class="moon-phase" id="moonPhase"></div>
             <div class="location" id="location">Detecting location...</div>
         </div>
         
@@ -282,6 +357,10 @@
                 civil: null,
                 nautical: null,
                 astronomical: null
+            },
+            moonData: {
+                phase: '',
+                illumination: 0
             }
         };
 
@@ -307,6 +386,57 @@
             } catch (error) {
                 return `${lat.toFixed(2)}°, ${lon.toFixed(2)}°`;
             }
+        }
+
+        // Get sun times from Open-Meteo API
+        async function getSunTimes(lat, lon) {
+            try {
+                // Determine which date to use based on 3am cutoff
+                const now = new Date();
+                const requestDate = new Date(now);
+                
+                // If it's before 3am, use yesterday's date
+                if (now.getHours() < 3) {
+                    requestDate.setDate(requestDate.getDate() - 1);
+                }
+                
+                const dateString = requestDate.toISOString().split('T')[0];
+                
+                const response = await fetch(
+                    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=sunset,sunrise&timezone=auto&start_date=${dateString}&end_date=${dateString}`
+                );
+                const data = await response.json();
+                
+                if (data.daily && data.daily.sunset && data.daily.sunset[0]) {
+                    return {
+                        sunset: new Date(data.daily.sunset[0]),
+                        sunrise: new Date(data.daily.sunrise[0])
+                    };
+                }
+            } catch (error) {
+                console.error('Error fetching sun times:', error);
+            }
+            return null;
+        }
+
+        // Get moon phase from Farmsense API
+        async function getMoonPhase() {
+            try {
+                const timestamp = Math.floor(Date.now() / 1000);
+                const response = await fetch(`https://api.farmsense.net/v1/moonphases/?d=${timestamp}`);
+                const data = await response.json();
+                
+                if (data && data[0]) {
+                    const moonData = data[0];
+                    return {
+                        phase: moonData.Phase,
+                        illumination: Math.round(moonData.Illumination * 100)
+                    };
+                }
+            } catch (error) {
+                console.error('Error fetching moon phase:', error);
+            }
+            return { phase: 'Unknown', illumination: 0 };
         }
 
         // Calculate sun times using sunrise equation
@@ -353,43 +483,41 @@
             return date;
         }
 
-        // Get appropriate base date for calculations (handles 3am cutoff)
-        function getBaseDate() {
-            const now = getCurrentTime();
-            const baseDate = new Date(now);
+        // Calculate accurate twilight times using sun angle calculations
+        function calculateTwilightTimes(apiSunsetTime, lat, lon) {
+            if (!apiSunsetTime || !lat || !lon) return null;
             
-            // If it's between midnight and 3am, use yesterday as base
-            if (now.getHours() < 3) {
-                baseDate.setDate(baseDate.getDate() - 1);
-            }
+            // Use the API sunset date for calculations
+            const date = new Date(apiSunsetTime);
+            date.setHours(0, 0, 0, 0);
             
-            baseDate.setHours(0, 0, 0, 0);
-            return baseDate;
+            // Calculate all sun times using astronomical formulas
+            const calculatedTimes = calculateSunTimes(lat, lon, date);
+            
+            // Convert calculated sunset to Date object
+            const calculatedSunset = hoursToDate(calculatedTimes.sunset, date);
+            
+            if (!calculatedSunset) return null;
+            
+            // Calculate offset between API sunset and calculated sunset
+            const offsetMinutes = (apiSunsetTime - calculatedSunset) / 60000;
+            
+            // Apply offset to all calculated twilight times for better accuracy
+            const civil = hoursToDate(calculatedTimes.civil, date);
+            const nautical = hoursToDate(calculatedTimes.nautical, date);
+            const astronomical = hoursToDate(calculatedTimes.astronomical, date);
+            
+            if (civil) civil.setMinutes(civil.getMinutes() + offsetMinutes);
+            if (nautical) nautical.setMinutes(nautical.getMinutes() + offsetMinutes);
+            if (astronomical) astronomical.setMinutes(astronomical.getMinutes() + offsetMinutes);
+            
+            return { civil, nautical, astronomical };
         }
 
-        // Calculate all times
-        function calculateAllTimes() {
-            if (!state.lat || !state.lon) return;
-            
-            const baseDate = getBaseDate();
-            const sunTimes = calculateSunTimes(state.lat, state.lon, baseDate);
-            
-            state.times.sunset = hoursToDate(sunTimes.sunset, baseDate);
-            state.times.civil = hoursToDate(sunTimes.civil, baseDate);
-            state.times.nautical = hoursToDate(sunTimes.nautical, baseDate);
-            state.times.astronomical = hoursToDate(sunTimes.astronomical, baseDate);
-            
-            // Handle times that cross midnight
-            const now = getCurrentTime();
-            Object.keys(state.times).forEach(key => {
-                if (state.times[key] && now.getHours() < 3) {
-                    // We're in the early morning hours
-                    if (state.times[key].getHours() >= 15) {
-                        // This is an evening time from yesterday
-                        state.times[key].setDate(state.times[key].getDate() - 1);
-                    }
-                }
-            });
+        // Update moon phase display
+        function updateMoonPhase() {
+            const moonPhaseDiv = document.getElementById('moonPhase');
+            moonPhaseDiv.innerHTML = `${state.moonData.phase} (${state.moonData.illumination}% illuminated)`;
         }
 
         // Format time for display
@@ -410,6 +538,30 @@
         function getMinutesUntil(time) {
             if (!time) return -999;
             const now = getCurrentTime();
+            
+            // Handle the 12am-3am edge case
+            if (now.getHours() < 3) {
+                // Create adjusted times for comparison
+                const adjustedNow = new Date(now);
+                const adjustedTime = new Date(time);
+                
+                // If the event time is in the evening (PM hours from yesterday)
+                if (time.getHours() >= 12) {
+                    // The event already happened yesterday evening
+                    return -999;
+                }
+                
+                // If the event time is in early morning hours (AM hours)
+                // These are actually from yesterday's calculation but happen "today"
+                // We need to ensure we're comparing times on the same conceptual day
+                if (adjustedTime.getDate() !== adjustedNow.getDate()) {
+                    adjustedTime.setDate(adjustedNow.getDate());
+                }
+                
+                return (adjustedTime - adjustedNow) / 60000;
+            }
+            
+            // Normal calculation for times after 3am
             return (time - now) / 60000;
         }
 
@@ -417,7 +569,21 @@
         function hasTimePassed(time) {
             if (!time) return true;
             const now = getCurrentTime();
-            return time < now;
+            
+            // Handle the 12am-3am edge case
+            if (now.getHours() < 3) {
+                // If we're between midnight and 3am, and the time is from yesterday evening
+                // (hours >= 12), then it has passed
+                if (time.getHours() >= 12) {
+                    return true;
+                }
+                // If the time is in the early morning hours (< 12), compare normally
+                // but remember these times are from yesterday
+                return now >= time;
+            }
+            
+            // Normal comparison for times after 3am
+            return now >= time;
         }
 
         // Update visual elements based on current state
@@ -516,6 +682,14 @@
             moon.style.top = `${moonTop}%`;
             moon.style.opacity = moonOpacity;
             
+            // Update moon phase attributes and CSS variables
+            const moonElement = document.getElementById('moon');
+            if (state.moonData.phase) {
+                moonElement.setAttribute('data-phase', state.moonData.phase.toLowerCase());
+                const illuminationPercent = 100 - state.moonData.illumination;
+                moonElement.style.setProperty('--_w', `${illuminationPercent}%`);
+            }
+            
             // Update sun color based on position
             if (untilSunset > 0 && untilSunset <= 60) {
                 sun.style.background = 'radial-gradient(circle, #ff8c00, #ff6347)';
@@ -527,7 +701,6 @@
         function updateDisplay() {
             if (!state.lat || !state.lon) return;
             
-            calculateAllTimes();
             updateVisuals();
             
             const now = getCurrentTime();
@@ -621,11 +794,54 @@
                     // Get city name
                     state.cityName = await getCityName(state.lat, state.lon);
                     
+                    // Get sun times from API
+                    const sunTimes = await getSunTimes(state.lat, state.lon);
+                    if (sunTimes) {
+                        state.times.sunset = sunTimes.sunset;
+                        
+                        // Calculate twilight times using astronomical calculations
+                        const twilightTimes = calculateTwilightTimes(sunTimes.sunset, state.lat, state.lon);
+                        if (twilightTimes) {
+                            state.times.civil = twilightTimes.civil;
+                            state.times.nautical = twilightTimes.nautical;
+                            state.times.astronomical = twilightTimes.astronomical;
+                        }
+                    }
+                    
+                    // Get moon phase
+                    state.moonData = await getMoonPhase();
+                    updateMoonPhase();
+                    
                     // Initial update
                     updateDisplay();
                     
                     // Start animation loop
                     requestAnimationFrame(animate);
+                    
+                    // Update moon phase every hour
+                    setInterval(async () => {
+                        state.moonData = await getMoonPhase();
+                        updateMoonPhase();
+                    }, 3600000); // 1 hour
+                    
+                    // Check for new day at 3am
+                    setInterval(async () => {
+                        const now = new Date();
+                        if (now.getHours() === 3 && now.getMinutes() === 0) {
+                            // Refresh sun times for the new day
+                            const newSunTimes = await getSunTimes(state.lat, state.lon);
+                            if (newSunTimes) {
+                                state.times.sunset = newSunTimes.sunset;
+                                
+                                const newTwilightTimes = calculateTwilightTimes(newSunTimes.sunset, state.lat, state.lon);
+                                if (newTwilightTimes) {
+                                    state.times.civil = newTwilightTimes.civil;
+                                    state.times.nautical = newTwilightTimes.nautical;
+                                    state.times.astronomical = newTwilightTimes.astronomical;
+                                }
+                            }
+                        }
+                    }, 60000); // Check every minute
                 },
                 error => {
                     showError('Unable to get your location. Please enable location services.');
