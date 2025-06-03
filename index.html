@@ -724,9 +724,39 @@
         function updateDisplay() {
             if (!state.lat || !state.lon) return;
             
-            updateVisuals();
-            
+            // Validate that no times are more than 24 hours away
             const now = getCurrentTime();
+            let needsRefresh = false;
+            
+            for (const [key, time] of Object.entries(state.times)) {
+                if (time) {
+                    const hoursDiff = (time - now) / (1000 * 60 * 60);
+                    if (hoursDiff > 24) {
+                        console.error(`${key} is ${hoursDiff.toFixed(1)} hours away - this should not happen`);
+                        needsRefresh = true;
+                    }
+                }
+            }
+            
+            if (needsRefresh) {
+                console.log('Times are invalid, refreshing sun data...');
+                // Re-fetch sun times
+                getSunTimes(state.lat, state.lon).then(sunTimes => {
+                    if (sunTimes) {
+                        state.times.sunset = sunTimes.sunset;
+                        const twilightTimes = calculateTwilightTimes(sunTimes.sunset, state.lat, state.lon);
+                        if (twilightTimes) {
+                            state.times.civil = twilightTimes.civil;
+                            state.times.nautical = twilightTimes.nautical;
+                            state.times.astronomical = twilightTimes.astronomical;
+                        }
+                        updateDisplay(); // Recursive call after refresh
+                    }
+                });
+                return;
+            }
+            
+            updateVisuals();
             
             // Create time cards
             const content = document.getElementById('content');
