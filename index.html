@@ -391,16 +391,15 @@
         // Get sun times from Open-Meteo API
         async function getSunTimes(lat, lon) {
             try {
-                // Determine which date to use based on 3am cutoff
                 const now = new Date();
-                const requestDate = new Date(now);
+                let requestDate = new Date(now);
                 
                 // If it's before 3am, use yesterday's date
                 if (now.getHours() < 3) {
                     requestDate.setDate(requestDate.getDate() - 1);
                 }
                 
-                const dateString = requestDate.toISOString().split('T')[0];
+                let dateString = requestDate.toISOString().split('T')[0];
                 
                 const response = await fetch(
                     `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=sunset,sunrise&timezone=auto&start_date=${dateString}&end_date=${dateString}`
@@ -408,10 +407,34 @@
                 const data = await response.json();
                 
                 if (data.daily && data.daily.sunset && data.daily.sunset[0]) {
-                    return {
-                        sunset: new Date(data.daily.sunset[0]),
-                        sunrise: new Date(data.daily.sunrise[0])
-                    };
+                    const sunset = new Date(data.daily.sunset[0]);
+                    const sunrise = new Date(data.daily.sunrise[0]);
+                    
+                    // Validate that times are not more than 24 hours in the future
+                    const hoursDiff = (sunset - now) / (1000 * 60 * 60);
+                    
+                    // If sunset is more than 24 hours away, we likely got tomorrow's data
+                    // This can happen near midnight or due to timezone issues
+                    if (hoursDiff > 24) {
+                        console.log('Sunset time is more than 24 hours away, fetching previous day data');
+                        // Try getting the previous day's data
+                        requestDate.setDate(requestDate.getDate() - 1);
+                        dateString = requestDate.toISOString().split('T')[0];
+                        
+                        const prevResponse = await fetch(
+                            `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=sunset,sunrise&timezone=auto&start_date=${dateString}&end_date=${dateString}`
+                        );
+                        const prevData = await prevResponse.json();
+                        
+                        if (prevData.daily && prevData.daily.sunset && prevData.daily.sunset[0]) {
+                            return {
+                                sunset: new Date(prevData.daily.sunset[0]),
+                                sunrise: new Date(prevData.daily.sunrise[0])
+                            };
+                        }
+                    }
+                    
+                    return { sunset, sunrise };
                 }
             } catch (error) {
                 console.error('Error fetching sun times:', error);
